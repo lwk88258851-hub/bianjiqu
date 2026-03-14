@@ -6,11 +6,11 @@ interface BlockRendererProps {
   block: Block;
   onUpdateBlock: (id: string, updates: Partial<Block>) => void;
   isActive?: boolean;
-  onDispatch?: (events?: BlockEvent[]) => void;
+  onDispatch?: (events?: BlockEvent[] | BlockEvent) => void;
 }
 
 export default function BlockRenderer({ block, onUpdateBlock, isActive, onDispatch }: BlockRendererProps) {
-  const { type, content, style, mathConfig, htmlContent, state, events, src, label } = block;
+  const { type, content, style, mathConfig, htmlContent, state, events, src, label, props } = block;
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -30,10 +30,25 @@ export default function BlockRenderer({ block, onUpdateBlock, isActive, onDispat
           <div 
             className="w-full h-full"
             dangerouslySetInnerHTML={{ 
-              __html: htmlContent || '<div style="padding:20px; background:#f3f4f6; border-radius:8px; text-align:center;">Empty Interactive Widget<br/>Paste HTML/Iframe in properties</div>' 
+              __html: props?.htmlContent || htmlContent || '<div style="padding:20px; background:#f3f4f6; border-radius:8px; text-align:center; color:#6b7280;">空白交互组件<br/>请在属性面板中粘贴 HTML 或 Iframe 代码</div>' 
             }}
+            style={{ pointerEvents: (isActive || block.locked) ? 'auto' : 'none' }}
           />
           {!isActive && !block.locked && (
+            <div className="absolute inset-0 bg-transparent z-10 cursor-move" />
+          )}
+        </div>
+      );
+    case 'iframe_sandbox':
+      return (
+        <div className="w-full h-full relative overflow-hidden rounded-lg bg-white border border-gray-200">
+          <iframe 
+            src={props?.url || src || "https://example.com"} 
+            className="w-full h-full border-0"
+            sandbox="allow-scripts allow-same-origin"
+            style={{ pointerEvents: (isActive || block.locked || props?.allowInteraction) ? 'auto' : 'none' }}
+          />
+          {!isActive && !block.locked && !props?.allowInteraction && (
             <div className="absolute inset-0 bg-transparent z-10 cursor-move" />
           )}
         </div>
@@ -42,12 +57,22 @@ export default function BlockRenderer({ block, onUpdateBlock, isActive, onDispat
       return (
         <div 
           className="w-full h-full p-2 outline-none no-resize-scroll overflow-auto text-gray-900 dark:text-gray-100"
-          style={style}
+          style={{
+            ...style,
+            fontSize: props?.fontSize || style?.fontSize,
+            color: props?.color || style?.color,
+          }}
           contentEditable
           suppressContentEditableWarning
-          onBlur={(e) => onUpdateBlock(block.id, { content: e.currentTarget.textContent || '' })}
+          onBlur={(e) => {
+            if (props && 'content' in props) {
+              onUpdateBlock(block.id, { props: { ...props, content: e.currentTarget.textContent || '' } });
+            } else {
+              onUpdateBlock(block.id, { content: e.currentTarget.textContent || '' });
+            }
+          }}
         >
-          {content}
+          {props?.content || content}
         </div>
       );
     
@@ -65,10 +90,12 @@ export default function BlockRenderer({ block, onUpdateBlock, isActive, onDispat
           }}
           onClick={(e) => {
             e.stopPropagation();
-            onDispatch?.(events?.onClick);
+            const eventData = events?.onClick || (Array.isArray(events) ? events : ((events as any)?.targetId || (events as any)?.targetName || (events as any)?.target ? events : undefined));
+            console.log('Action Button clicked:', eventData);
+            onDispatch?.(eventData as any);
           }}
         >
-          {label || content || 'Action Button'}
+          {label || content || '操作按钮'}
         </button>
       );
 
@@ -85,16 +112,13 @@ export default function BlockRenderer({ block, onUpdateBlock, isActive, onDispat
             ...style
           }}
           onClick={(e) => {
-            // In a real app, this would trigger the action
-            console.log(`Action triggered: ${block.action}`);
-            
-            // Example: if action is to toggle hidden state of other blocks
-            if (block.action === 'toggle_visibility') {
-              // This logic is handled in Workspace for now, but could be passed down
-            }
+            e.stopPropagation();
+            const eventData = events?.onClick || (Array.isArray(events) ? events : ((events as any)?.targetId || (events as any)?.targetName || (events as any)?.target ? events : undefined));
+            console.log('Interactive Button clicked:', eventData);
+            onDispatch?.(eventData as any);
           }}
         >
-          {content || 'Button'}
+          {content || '按钮'}
         </button>
       );
 
@@ -111,7 +135,7 @@ export default function BlockRenderer({ block, onUpdateBlock, isActive, onDispat
             />
           ) : (
             <div className="w-full h-full bg-gray-100 dark:bg-slate-800 flex items-center justify-center text-gray-400 dark:text-gray-500">
-              <span>Image Placeholder</span>
+              <span>图片占位符</span>
             </div>
           )}
         </div>
@@ -130,7 +154,7 @@ export default function BlockRenderer({ block, onUpdateBlock, isActive, onDispat
             playsInline
           />
           {!src && !content && (
-            <span className="text-gray-400 dark:text-gray-500 absolute">Video Player</span>
+            <span className="text-gray-400 dark:text-gray-500 absolute">视频播放器</span>
           )}
         </div>
       );
@@ -197,7 +221,7 @@ export default function BlockRenderer({ block, onUpdateBlock, isActive, onDispat
     default:
       return (
         <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400">
-          Unknown Block Type
+          未知组件类型
         </div>
       );
   }

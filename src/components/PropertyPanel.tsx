@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { ChevronDown, PlusCircle, Zap, X, Sparkles, Loader2, Lock, Unlock } from 'lucide-react';
-import { Block, Page } from '../types';
-import { refineCode } from '../services/geminiService';
+import { ChevronDown, PlusCircle, Zap, X, Sparkles, Loader2, Lock, Unlock, Copy, Check, Wand2 } from 'lucide-react';
+import { Block, Page, BlockEvent } from '../types';
+import { refineCode, generateEventFromPrompt } from '../services/geminiService';
 
 interface PropertyPanelProps {
   activeBlock: Block | null;
@@ -13,6 +13,49 @@ interface PropertyPanelProps {
 export default function PropertyPanel({ activeBlock, activePage, onUpdateBlock, onUpdatePage }: PropertyPanelProps) {
   const [refineInstruction, setRefineInstruction] = useState('');
   const [isRefining, setIsRefining] = useState(false);
+  const [eventsJson, setEventsJson] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [aiEventPrompt, setAiEventPrompt] = useState('');
+  const [isGeneratingEvent, setIsGeneratingEvent] = useState(false);
+  const [showAiEventInput, setShowAiEventInput] = useState(false);
+  const [eventAiPrompts, setEventAiPrompts] = useState<Record<number, string>>({});
+
+  React.useEffect(() => {
+    if (activeBlock) {
+      setEventsJson(activeBlock.events ? JSON.stringify(activeBlock.events, null, 2) : '');
+    }
+  }, [activeBlock?.id, activeBlock?.events]);
+
+  const handleGenerateAiEvent = async () => {
+    if (!activeBlock || !activePage || !aiEventPrompt.trim()) return;
+    setIsGeneratingEvent(true);
+    try {
+      const newEvents = await generateEventFromPrompt(aiEventPrompt, activeBlock, activePage.blocks);
+      const currentEvents = activeBlock.events || {};
+      const onClick = Array.isArray(currentEvents.onClick) ? currentEvents.onClick : (currentEvents.onClick ? [currentEvents.onClick] : []);
+      
+      onUpdateBlock({ 
+        events: { 
+          ...currentEvents, 
+          onClick: [...onClick, ...newEvents] 
+        } 
+      });
+      setAiEventPrompt('');
+      setShowAiEventInput(false);
+    } catch (error) {
+      console.error("Failed to generate AI event:", error);
+    } finally {
+      setIsGeneratingEvent(false);
+    }
+  };
+
+  const handleCopyName = () => {
+    if (activeBlock?.name) {
+      navigator.clipboard.writeText(activeBlock.name);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   const handleRefine = async () => {
     if (!activeBlock || !refineInstruction.trim() || activeBlock.type !== 'dynamic_html') return;
@@ -66,11 +109,88 @@ export default function PropertyPanel({ activeBlock, activePage, onUpdateBlock, 
     );
   }
 
+  const handlePropChange = (key: string, value: any) => {
+    if (!activeBlock) return;
+    onUpdateBlock({
+      props: {
+        ...(activeBlock.props || {}),
+        [key]: value
+      }
+    });
+  };
+
+  const renderDynamicProps = () => {
+    if (!activeBlock || !activeBlock.props) return null;
+    
+    return Object.entries(activeBlock.props).map(([key, value]) => {
+      if (typeof value === 'boolean') {
+        return (
+          <div key={key} className="flex items-center justify-between">
+            <label className="text-sm text-gray-600 dark:text-gray-400">{key}</label>
+            <input 
+              type="checkbox" 
+              checked={value}
+              onChange={(e) => handlePropChange(key, e.target.checked)}
+              className="rounded border-gray-300"
+            />
+          </div>
+        );
+      }
+      
+      if (typeof value === 'string' && value.startsWith('#')) {
+        return (
+          <div key={key} className="space-y-1">
+            <label className="text-sm text-gray-600 dark:text-gray-400">{key}</label>
+            <div className="flex gap-2">
+              <input 
+                type="color" 
+                value={value}
+                onChange={(e) => handlePropChange(key, e.target.value)}
+                className="w-8 h-8 rounded cursor-pointer border-0 p-0"
+              />
+              <input 
+                type="text" 
+                value={value}
+                onChange={(e) => handlePropChange(key, e.target.value)}
+                className="flex-1 text-xs border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 border rounded focus:ring-blue-500 p-2 font-mono"
+              />
+            </div>
+          </div>
+        );
+      }
+
+      if (typeof value === 'string' && (value.includes('<') || value.length > 50)) {
+        return (
+          <div key={key} className="space-y-1">
+            <label className="text-sm text-gray-600 dark:text-gray-400">{key}</label>
+            <textarea 
+              value={value}
+              onChange={(e) => handlePropChange(key, e.target.value)}
+              className="w-full text-xs border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 border rounded focus:ring-blue-500 p-2 min-h-[100px] font-mono"
+            />
+          </div>
+        );
+      }
+
+      return (
+        <div key={key} className="space-y-1">
+          <label className="text-sm text-gray-600 dark:text-gray-400">{key}</label>
+          <input 
+            type={typeof value === 'number' ? 'number' : 'text'} 
+            value={value}
+            onChange={(e) => handlePropChange(key, typeof value === 'number' ? Number(e.target.value) : e.target.value)}
+            className="w-full text-xs border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 border rounded focus:ring-blue-500 p-2"
+          />
+        </div>
+      );
+    });
+  };
+
   return (
     <aside className="w-72 border-l bg-white dark:bg-slate-800 dark:border-slate-700 flex flex-col overflow-y-auto transition-colors duration-300">
       <div className="p-4 border-b dark:border-slate-700 flex items-center justify-between">
         <h2 className="font-bold text-sm text-gray-800 dark:text-gray-200">
-          属性 - {activeBlock.type === 'math-graph' ? '数学函数图' : '元素'}
+          属性 - {activeBlock.type}
         </h2>
         <button 
           onClick={() => onUpdateBlock({ locked: !activeBlock.locked })}
@@ -80,6 +200,300 @@ export default function PropertyPanel({ activeBlock, activePage, onUpdateBlock, 
           {activeBlock.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
         </button>
       </div>
+
+      <section className="p-4 border-b dark:border-slate-700">
+        <div className="mb-2">
+          <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-1">组件名称 (用于AI识别)</label>
+          <div className="flex gap-2">
+            <input 
+              type="text" 
+              value={activeBlock.name || ''} 
+              onChange={(e) => onUpdateBlock({ name: e.target.value })}
+              placeholder="例如：图片 1"
+              className="flex-1 text-xs border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 border rounded p-2"
+            />
+            <button 
+              onClick={handleCopyName}
+              className="p-1.5 text-gray-400 hover:text-blue-500 transition-colors bg-gray-50 dark:bg-slate-700 rounded border border-gray-200 dark:border-slate-600"
+              title="复制名称"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+          <p className="text-[9px] text-gray-400 mt-1">
+            在其他组件的事件绑定中使用此名称作为 targetId。
+          </p>
+        </div>
+      </section>
+
+      {/* Standard Position Settings */}
+      <section className="p-4 border-b dark:border-slate-700">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">布局 (X, Y, W, H)</h3>
+          <ChevronDown className="w-3 h-3 text-gray-400 dark:text-gray-500" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-1">X</label>
+            <input 
+              type="number" 
+              value={Math.round(activeBlock.x)} 
+              onChange={(e) => onUpdateBlock({ x: Number(e.target.value) })}
+              className="w-full text-xs border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 border rounded p-2"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-1">Y</label>
+            <input 
+              type="number" 
+              value={Math.round(activeBlock.y)} 
+              onChange={(e) => onUpdateBlock({ y: Number(e.target.value) })}
+              className="w-full text-xs border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 border rounded p-2"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-1">W</label>
+            <input 
+              type="number" 
+              value={Math.round(activeBlock.width)} 
+              onChange={(e) => onUpdateBlock({ width: Number(e.target.value) })}
+              className="w-full text-xs border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 border rounded p-2"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-1">H</label>
+            <input 
+              type="number" 
+              value={Math.round(activeBlock.height)} 
+              onChange={(e) => onUpdateBlock({ height: Number(e.target.value) })}
+              className="w-full text-xs border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 border rounded p-2"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Visual Event Editor */}
+      <section className="p-4 border-b dark:border-slate-700">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">交互事件</h3>
+          <div className="flex gap-1">
+            <button 
+              onClick={() => setShowAiEventInput(!showAiEventInput)}
+              className={`p-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+                showAiEventInput 
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-blue-900/40' 
+                  : 'bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400'
+              }`}
+              title="AI 智能创作交互"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${showAiEventInput ? 'animate-pulse' : ''}`} />
+              <span className="text-[10px] font-bold">AI 模式</span>
+            </button>
+            <button 
+              onClick={() => {
+                const currentEvents = activeBlock.events || {};
+                const onClick = Array.isArray(currentEvents.onClick) ? currentEvents.onClick : (currentEvents.onClick ? [currentEvents.onClick] : []);
+                onUpdateBlock({ 
+                  events: { 
+                    ...currentEvents, 
+                    onClick: [...onClick, { targetId: '', action: 'TOGGLE_VISIBILITY' }] 
+                  } 
+                });
+              }}
+              className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-gray-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
+              title="手动添加点击事件"
+            >
+              <PlusCircle className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {showAiEventInput && (
+          <div className="mb-4 p-3 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 rounded-xl border border-blue-100 dark:border-blue-900/30 shadow-sm">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Sparkles className="w-3 h-3 text-blue-500" />
+              <label className="block text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-tight">AI 交互指令</label>
+            </div>
+            <div className="flex gap-2">
+              <input 
+                type="text"
+                value={aiEventPrompt}
+                onChange={(e) => setAiEventPrompt(e.target.value)}
+                placeholder="例如：点击后生成一个红色三角形..."
+                className="flex-1 text-[10px] border-blue-200 dark:border-blue-800 bg-white/80 dark:bg-slate-800/80 text-gray-900 dark:text-gray-100 border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                onKeyDown={(e) => e.key === 'Enter' && handleGenerateAiEvent()}
+              />
+              <button 
+                onClick={handleGenerateAiEvent}
+                disabled={isGeneratingEvent || !aiEventPrompt.trim()}
+                className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all shadow-md shadow-blue-200 dark:shadow-none"
+              >
+                {isGeneratingEvent ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+        )}
+        
+        <div className="space-y-3">
+          {(() => {
+            const currentEvents = activeBlock.events || {};
+            const onClickEvents = Array.isArray(currentEvents.onClick) 
+              ? currentEvents.onClick 
+              : (currentEvents.onClick ? [currentEvents.onClick] : []);
+
+            if (onClickEvents.length === 0) {
+              return <p className="text-[10px] text-gray-400 italic text-center py-2">暂无点击事件</p>;
+            }
+
+            return onClickEvents.map((event, idx) => (
+              <div key={idx} className="p-3 bg-gray-50 dark:bg-slate-900/50 rounded-xl border border-gray-100 dark:border-slate-700 space-y-3 relative group transition-all hover:border-blue-200 dark:hover:border-blue-800">
+                <button 
+                  onClick={() => {
+                    const newOnClick = onClickEvents.filter((_, i) => i !== idx);
+                    onUpdateBlock({ events: { ...currentEvents, onClick: newOnClick } });
+                  }}
+                  className="absolute -top-1.5 -right-1.5 p-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-full text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all shadow-sm z-10"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[9px] text-gray-400 font-bold uppercase mb-1">目标组件</label>
+                    <select 
+                      className="w-full text-[10px] border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100 border rounded-lg p-1.5 outline-none focus:ring-1 focus:ring-blue-500"
+                      value={event.action === 'CREATE' ? 'CREATE_TARGET' : event.targetId}
+                      disabled={event.action === 'CREATE'}
+                      onChange={(e) => {
+                        const newOnClick = [...onClickEvents];
+                        newOnClick[idx] = { ...event, targetId: e.target.value };
+                        onUpdateBlock({ events: { ...currentEvents, onClick: newOnClick } });
+                      }}
+                    >
+                      <option value="">选择目标...</option>
+                      <option value="CREATE_TARGET" disabled={event.action !== 'CREATE'}>[AI 生成组件]</option>
+                      {activePage?.blocks
+                        .filter(b => b.id !== activeBlock.id)
+                        .map(b => (
+                          <option key={b.id} value={b.name || b.id}>
+                            {b.name || `${b.type} (${b.id.slice(0,4)})`}
+                          </option>
+                        ))
+                      }
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] text-gray-400 font-bold uppercase mb-1">执行动作</label>
+                    <select 
+                      className="w-full text-[10px] border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100 border rounded-lg p-1.5 outline-none focus:ring-1 focus:ring-blue-500"
+                      value={event.action}
+                      onChange={(e) => {
+                        const newOnClick = [...onClickEvents];
+                        newOnClick[idx] = { ...event, action: e.target.value };
+                        onUpdateBlock({ events: { ...currentEvents, onClick: newOnClick } });
+                      }}
+                    >
+                      <option value="TOGGLE_VISIBILITY">切换显示/隐藏</option>
+                      <option value="SHOW">显示</option>
+                      <option value="HIDE">隐藏</option>
+                      <option value="PLAY">播放 (视频)</option>
+                      <option value="PAUSE">暂停 (视频)</option>
+                      <option value="CREATE">创建新组件 (AI)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {event.action === 'CREATE' && (
+                  <div className="pt-2 border-t border-gray-100 dark:border-slate-800">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-[9px] text-blue-500 font-bold uppercase">AI 组件定制描述</label>
+                      <Sparkles className="w-3 h-3 text-blue-400" />
+                    </div>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text"
+                        placeholder="描述要生成的组件..."
+                        className="flex-1 text-[10px] border-blue-100 dark:border-blue-900/30 bg-blue-50/30 dark:bg-blue-900/10 text-gray-900 dark:text-gray-100 border rounded-lg p-1.5 outline-none focus:ring-1 focus:ring-blue-500"
+                        value={eventAiPrompts[idx] || ''}
+                        onChange={(e) => setEventAiPrompts({ ...eventAiPrompts, [idx]: e.target.value })}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') {
+                            const prompt = eventAiPrompts[idx];
+                            if (!prompt) return;
+                            // Trigger AI generation for this specific CREATE action
+                            const newEvents = await generateEventFromPrompt(prompt, activeBlock, activePage?.blocks || []);
+                            if (newEvents.length > 0 && newEvents[0].action === 'CREATE') {
+                              const newOnClick = [...onClickEvents];
+                              newOnClick[idx] = { ...newEvents[0] };
+                              onUpdateBlock({ events: { ...currentEvents, onClick: newOnClick } });
+                            }
+                          }
+                        }}
+                      />
+                      <button 
+                        className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-200 transition-colors"
+                        title="AI 生成组件配置"
+                        onClick={async () => {
+                          const prompt = eventAiPrompts[idx];
+                          if (!prompt) return;
+                          const newEvents = await generateEventFromPrompt(prompt, activeBlock, activePage?.blocks || []);
+                          if (newEvents.length > 0 && newEvents[0].action === 'CREATE') {
+                            const newOnClick = [...onClickEvents];
+                            newOnClick[idx] = { ...newEvents[0] };
+                            onUpdateBlock({ events: { ...currentEvents, onClick: newOnClick } });
+                          }
+                        }}
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ));
+          })()}
+        </div>
+      </section>
+
+      {/* Events Debug View (Collapsed by default) */}
+      <section className="p-4 border-b dark:border-slate-700">
+        <details>
+          <summary className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest cursor-pointer hover:text-gray-600 flex items-center justify-between">
+            高级事件设置 (JSON)
+            <ChevronDown className="w-3 h-3" />
+          </summary>
+          <div className="mt-4">
+            <textarea 
+              className="w-full text-[10px] border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-300 border rounded p-2 min-h-[100px] font-mono focus:ring-blue-500"
+              value={eventsJson}
+              placeholder='{"onClick": [{"targetId": "...", "action": "TOGGLE_VISIBILITY"}]}'
+              onChange={(e) => {
+                setEventsJson(e.target.value);
+                try {
+                  const parsed = e.target.value ? JSON.parse(e.target.value) : undefined;
+                  onUpdateBlock({ events: parsed });
+                } catch (err) {
+                  // Invalid JSON, ignore until valid
+                }
+              }}
+            />
+          </div>
+        </details>
+      </section>
+
+      {/* Dynamic Props Settings */}
+      {activeBlock.props && Object.keys(activeBlock.props).length > 0 && (
+        <section className="p-4 border-b dark:border-slate-700">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">动态属性 (Props)</h3>
+            <ChevronDown className="w-3 h-3 text-gray-400 dark:text-gray-500" />
+          </div>
+          <div className="space-y-4">
+            {renderDynamicProps()}
+          </div>
+        </section>
+      )}
 
       {/* Math Engine Settings */}
       {activeBlock.type === 'math-graph' && activeBlock.mathConfig && (
@@ -312,8 +726,8 @@ export default function PropertyPanel({ activeBlock, activePage, onUpdateBlock, 
                 value={activeBlock.style?.fontWeight || 'normal'}
                 onChange={(e) => onUpdateBlock({ style: { ...activeBlock.style, fontWeight: e.target.value } })}
               >
-                <option value="normal">Normal</option>
-                <option value="bold">Bold</option>
+                <option value="normal">常规</option>
+                <option value="bold">加粗</option>
                 <option value="100">100</option>
                 <option value="200">200</option>
                 <option value="300">300</option>

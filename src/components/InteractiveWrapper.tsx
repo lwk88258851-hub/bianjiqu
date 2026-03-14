@@ -136,7 +136,8 @@ export default function InteractiveWrapper({ block, isActive, onSelect, onUpdate
         top: block.y,
         width: block.width,
         height: block.height,
-        pointerEvents: 'auto'
+        pointerEvents: 'auto',
+        display: block.state?.isVisible === false ? 'none' : 'block'
       }}
       onMouseDown={handleMouseDown}
     >

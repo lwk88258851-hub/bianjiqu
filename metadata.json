@@ -1,5 +1,5 @@
 {
-  "name": "",
-  "description": "",
+  "name": "EduClass 编辑器",
+  "description": "一个全局事件驱动响应引擎的通用画布，支持拖拽图片、视频、HTML网页，并支持AI生成组件。",
   "requestFramePermissions": []
 }

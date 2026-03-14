@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Settings2, Trash2, Activity, Type, Image as ImageIcon, Video, Shapes, BookOpenCheck, PawPrint, Sparkles, Send, Loader2, Play, Triangle, Code, Lock, Unlock } from 'lucide-react';
+import { Settings2, Trash2, Activity, Type, Image as ImageIcon, Video, Shapes, BookOpenCheck, PawPrint, Sparkles, Send, Loader2, Play, Triangle, Code, Lock, Unlock, Zap } from 'lucide-react';
 import { generateBlockFromPrompt } from '../services/geminiService';
 import { Page, Block, BlockType, BlockEvent } from '../types';
 import MathGraph from './MathGraph';
@@ -26,6 +26,8 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [promptValue, setPromptValue] = useState('');
+  const [functionPromptValue, setFunctionPromptValue] = useState('');
+  const [copilotMode, setCopilotMode] = useState<'ui' | 'function'>('ui');
   const [isGenerating, setIsGenerating] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
 
@@ -97,11 +99,17 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
     setIsGenerating(true);
     
     try {
-      const generatedBlock = await generateBlockFromPrompt(promptValue, selectionBox);
+      const generatedBlock = await generateBlockFromPrompt(
+        promptValue, 
+        selectionBox, 
+        page.blocks,
+        functionPromptValue
+      );
       
       onAddBlock({
         type: generatedBlock.type,
         content: generatedBlock.content,
+        htmlContent: generatedBlock.htmlContent,
         x: selectionBox.x,
         y: selectionBox.y,
         width: selectionBox.w,
@@ -112,7 +120,8 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
         state: generatedBlock.state,
         events: generatedBlock.events,
         label: generatedBlock.label,
-        src: generatedBlock.src
+        src: generatedBlock.src,
+        props: generatedBlock.props
       });
     } catch (error) {
       console.error("Failed to generate block:", error);
@@ -122,21 +131,57 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
       setShowPrompt(false);
       setSelectionBox(null);
       setPromptValue('');
+      setFunctionPromptValue('');
+      setCopilotMode('ui');
     }
   };
 
-  const handleDispatch = (events?: BlockEvent[]) => {
+  const handleDispatch = (events?: BlockEvent[] | BlockEvent) => {
+    console.log('handleDispatch received events:', events);
     if (!events) return;
-    events.forEach(event => {
-      const targetBlock = page.blocks.find(b => b.id === event.targetId);
+    
+    const eventList = Array.isArray(events) ? events : [events];
+    
+    eventList.forEach(event => {
+      console.log('Processing event:', event);
+      const targetId = event.targetId || (event as any).targetName || (event as any).target;
+      if (!targetId) {
+        console.warn('Invalid event or missing targetId:', event);
+        return;
+      }
+      const targetBlock = page.blocks.find(b => b.id === targetId || b.name === targetId);
       if (targetBlock) {
-        if (event.action === 'PLAY') {
+        console.log('Found target block:', targetBlock);
+        const action = event.action?.toUpperCase();
+        if (action === 'PLAY') {
           onUpdateBlock(targetBlock.id, { state: { ...targetBlock.state, isPlaying: true } });
-        } else if (event.action === 'PAUSE') {
+        } else if (action === 'PAUSE') {
           onUpdateBlock(targetBlock.id, { state: { ...targetBlock.state, isPlaying: false } });
-        } else if (event.action === 'TOGGLE_VISIBILITY') {
-          onUpdateBlock(targetBlock.id, { hidden: !targetBlock.hidden });
+        } else if (action === 'TOGGLE_VISIBILITY' || action === 'TOGGLE') {
+          const currentIsVisible = targetBlock.state?.isVisible ?? true;
+          console.log('Toggling visibility for', targetBlock.id, 'from', currentIsVisible, 'to', !currentIsVisible);
+          onUpdateBlock(targetBlock.id, { state: { ...targetBlock.state, isVisible: !currentIsVisible } });
+        } else if (action === 'HIDE') {
+          onUpdateBlock(targetBlock.id, { state: { ...targetBlock.state, isVisible: false } });
+        } else if (action === 'SHOW') {
+          onUpdateBlock(targetBlock.id, { state: { ...targetBlock.state, isVisible: true } });
         }
+      } else if (event.action?.toUpperCase() === 'CREATE') {
+        const type = event.targetId as any;
+        const props = event.value || {};
+        onAddBlock({
+          type,
+          x: props.x || 100,
+          y: props.y || 100,
+          width: props.width || 200,
+          height: props.height || 150,
+          content: props.content,
+          style: props.style,
+          props: props.props,
+          name: props.name || `${type}_${Date.now()}`
+        });
+      } else {
+        console.log('Target block not found for id:', event.targetId);
       }
     });
   };
@@ -196,13 +241,41 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
-    if (file && (file.type === 'text/html' || file.type === 'text/plain' || file.name.endsWith('.html') || file.name.endsWith('.txt'))) {
+    if (!file) return;
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    const x = rect ? e.clientX - rect.left : 100;
+    const y = rect ? e.clientY - rect.top : 100;
+
+    if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = (event) => {
         const content = event.target?.result as string;
-        const rect = containerRef.current?.getBoundingClientRect();
-        const x = rect ? e.clientX - rect.left : 100;
-        const y = rect ? e.clientY - rect.top : 100;
+        onAddBlock({
+          type: 'image',
+          x,
+          y,
+          width: 400,
+          height: 300,
+          content: content
+        });
+      };
+      reader.readAsDataURL(file);
+    } else if (file.type.startsWith('video/')) {
+      const url = URL.createObjectURL(file);
+      onAddBlock({
+        type: 'video',
+        x,
+        y,
+        width: 480,
+        height: 270,
+        src: url,
+        state: { isPlaying: false }
+      });
+    } else if (file.type === 'text/html' || file.type === 'text/plain' || file.name.endsWith('.html') || file.name.endsWith('.txt')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
         onAddBlock({ 
           type: 'dynamic_html', 
           x, 
@@ -237,7 +310,6 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
 
         {/* Render Blocks */}
         {page.blocks.map(block => {
-          if (block.hidden) return null;
           const isActive = block.id === activeBlockId;
           return (
             <InteractiveWrapper
@@ -255,7 +327,10 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
               />
               
               {isActive && (
-                <div className="absolute top-2 right-2 flex gap-1 bg-white/80 backdrop-blur p-1 rounded shadow-sm z-50">
+                <div className="absolute top-2 right-2 flex gap-1 bg-white/80 backdrop-blur p-1 rounded shadow-sm z-50 items-center">
+                  <span className="text-[10px] text-gray-500 font-medium px-1 mr-1 border-r border-gray-200">
+                    {block.name}
+                  </span>
                   <button 
                     className={`p-1 hover:bg-gray-100 rounded ${block.locked ? 'text-blue-500' : 'text-gray-400'}`}
                     onClick={(e) => { e.stopPropagation(); onUpdateBlock(block.id, { locked: !block.locked }); }}
@@ -307,34 +382,62 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
             style={{
               left: selectionBox.x,
               top: selectionBox.y + selectionBox.h + 16,
-              width: Math.max(selectionBox.w, 400),
+              width: Math.max(selectionBox.w, 450),
             }}
           >
             <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl border border-white/40 dark:border-slate-700/40 shadow-2xl rounded-2xl p-2 flex items-center gap-2 ring-1 ring-black/5 dark:ring-white/5">
-              <div className="bg-blue-600 p-2 rounded-xl shadow-lg shadow-blue-200 dark:shadow-blue-900/20">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <input 
-                autoFocus
-                type="text"
-                placeholder="让 AI 在这里生成组件 (如：数学函数图、题目卡片)..."
-                className="flex-1 bg-transparent border-none outline-none text-sm font-medium text-gray-800 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 px-2"
-                value={promptValue}
-                onChange={(e) => setPromptValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleGenerate();
-                  if (e.key === 'Escape') {
-                    setShowPrompt(false);
-                    setSelectionBox(null);
-                  }
-                }}
-              />
+              <button 
+                onClick={() => setCopilotMode(copilotMode === 'ui' ? 'function' : 'ui')}
+                className={`p-2 rounded-xl shadow-lg transition-all ${
+                  copilotMode === 'ui' 
+                    ? 'bg-blue-600 text-white shadow-blue-200 dark:shadow-blue-900/20' 
+                    : 'bg-purple-600 text-white shadow-purple-200 dark:shadow-purple-900/20'
+                }`}
+                title={copilotMode === 'ui' ? '切换到功能模式' : '切换到样式模式'}
+              >
+                {copilotMode === 'ui' ? <Sparkles className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
+              </button>
+              
+              {copilotMode === 'ui' ? (
+                <input 
+                  autoFocus
+                  type="text"
+                  placeholder="让 AI 生成组件 (输入文字、样式、类型)..."
+                  className="flex-1 bg-transparent border-none outline-none text-sm font-medium text-gray-800 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 px-2"
+                  value={promptValue}
+                  onChange={(e) => setPromptValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleGenerate();
+                    if (e.key === 'Escape') {
+                      setShowPrompt(false);
+                      setSelectionBox(null);
+                    }
+                  }}
+                />
+              ) : (
+                <input 
+                  autoFocus
+                  type="text"
+                  placeholder="为组件添加功能 (如：点击后隐藏某组件、播放视频)..."
+                  className="flex-1 bg-transparent border-none outline-none text-sm font-medium text-purple-700 dark:text-purple-300 placeholder:text-purple-300 dark:placeholder:text-purple-700 px-2"
+                  value={functionPromptValue}
+                  onChange={(e) => setFunctionPromptValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleGenerate();
+                    if (e.key === 'Escape') {
+                      setShowPrompt(false);
+                      setSelectionBox(null);
+                    }
+                  }}
+                />
+              )}
+
               <button 
                 onClick={handleGenerate}
-                disabled={!promptValue.trim()}
+                disabled={!promptValue.trim() && !functionPromptValue.trim()}
                 className={`p-2 rounded-xl transition-all ${
-                  promptValue.trim() 
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-blue-900/20 hover:scale-105 active:scale-95' 
+                  (promptValue.trim() || functionPromptValue.trim())
+                    ? (copilotMode === 'ui' ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-purple-600 text-white shadow-purple-200')
                     : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-gray-500'
                 }`}
               >
@@ -342,11 +445,18 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
               </button>
             </div>
             <div className="mt-2 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-              {['数学函数图', '题目卡片', '互动神兽', '3D 模型'].map(suggestion => (
+              {(copilotMode === 'ui' ? ['数学函数图', '题目卡片', '互动神兽', '3D 模型'] : ['点击切换显示', '点击播放视频', '点击创建三角形']).map(suggestion => (
                 <button 
                   key={suggestion}
-                  onClick={() => setPromptValue(suggestion)}
-                  className="px-3 py-1 bg-white/50 dark:bg-slate-800/50 backdrop-blur border border-white/40 dark:border-slate-700/40 rounded-full text-[10px] font-bold text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-700 hover:text-blue-600 dark:hover:text-blue-400 transition-all whitespace-nowrap"
+                  onClick={() => {
+                    if (copilotMode === 'ui') setPromptValue(suggestion);
+                    else setFunctionPromptValue(suggestion);
+                  }}
+                  className={`px-3 py-1 backdrop-blur border border-white/40 dark:border-slate-700/40 rounded-full text-[10px] font-bold transition-all whitespace-nowrap ${
+                    copilotMode === 'ui'
+                      ? 'bg-white/50 dark:bg-slate-800/50 text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-700 hover:text-blue-600 dark:hover:text-blue-400'
+                      : 'bg-purple-50/50 dark:bg-purple-900/20 text-purple-500 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/40 hover:text-purple-700 dark:hover:text-purple-300'
+                  }`}
                 >
                   + {suggestion}
                 </button>
@@ -448,7 +558,7 @@ export default function Workspace({ page, activeBlockId, onSelectBlock, onUpdate
               type: 'dynamic_html', 
               width: 400,
               height: 300,
-              htmlContent: '<div style="padding:20px; background:#f3f4f6; border-radius:8px; text-align:center; color:#666;">Empty Interactive Widget<br/>Paste HTML/Iframe in properties</div>'
+              htmlContent: '<div style="padding:20px; background:#f3f4f6; border-radius:8px; text-align:center; color:#666;">空白交互组件<br/>请在属性面板中粘贴 HTML 或 Iframe 代码</div>'
             }); 
           }}
           className="w-12 h-12 flex items-center justify-center rounded-xl hover:bg-orange-50 dark:hover:bg-orange-900/30 text-orange-600 dark:text-orange-400 transition-all hover:-translate-y-1" 

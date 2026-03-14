@@ -15,7 +15,7 @@ import { INITIAL_STATE } from './constants';
 export default function App() {
   const [courseware, setCourseware] = useState<CoursewareSchema>(INITIAL_STATE);
   const [activeSection, setActiveSection] = useState<SectionType>('探究');
-  const [activePageId, setActivePageId] = useState<string>('page-demo');
+  const [activePageId, setActivePageId] = useState<string>('page-1');
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
 
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
@@ -61,14 +61,31 @@ export default function App() {
   const handleAddBlock = (blockData: Partial<Block> & { type: BlockType }) => {
     if (!activePageId) return;
 
+    const x = blockData.x !== undefined ? blockData.x : 100;
+    const y = blockData.y !== undefined ? blockData.y : 100;
+    const typeNames: Record<string, string> = {
+      'text': '文本',
+      'image': '图片',
+      'video': '视频',
+      'math-graph': '数学图表',
+      'interactive_button': '交互按钮',
+      'action_button': '操作按钮',
+      'dynamic_html': '网页组件',
+      'iframe_sandbox': '沙盒组件'
+    };
+    const typeName = typeNames[blockData.type] || blockData.type;
+    const name = blockData.name || `${typeName}_${Math.round(x)}_${Math.round(y)}`;
+
     const newBlock: Block = {
       id: `block-${Date.now()}`,
+      name,
       type: blockData.type,
-      x: blockData.x !== undefined ? blockData.x : 100,
-      y: blockData.y !== undefined ? blockData.y : 100,
+      x,
+      y,
       width: blockData.width !== undefined ? blockData.width : (blockData.type === 'math-graph' ? 320 : 200),
       height: blockData.height !== undefined ? blockData.height : (blockData.type === 'math-graph' ? 256 : 100),
       content: blockData.content || '',
+      htmlContent: blockData.htmlContent,
       mathConfig: blockData.type === 'math-graph' ? (blockData.mathConfig || {
         equation: 'y = x²',
         showGrid: true,
@@ -79,10 +96,11 @@ export default function App() {
       }) : undefined,
       style: blockData.style,
       action: blockData.action,
-      state: blockData.state,
+      state: { isVisible: true, ...(blockData.state || {}) },
       events: blockData.events,
       label: blockData.label,
-      src: blockData.src
+      src: blockData.src,
+      props: blockData.props
     };
 
     setCourseware(prev => ({

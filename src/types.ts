@@ -1,4 +1,4 @@
-export type BlockType = 'text' | 'image' | 'video' | 'math-graph' | 'quiz' | 'interaction' | 'interactive_button' | 'right_triangle' | 'dynamic_html' | 'action_button';
+export type BlockType = 'text' | 'image' | 'video' | 'math-graph' | 'quiz' | 'interaction' | 'interactive_button' | 'right_triangle' | 'dynamic_html' | 'action_button' | 'iframe_sandbox';
 
 export type SectionType = '封面' | '目录' | '引入' | '探究' | '笔记' | '练习' | '总结' | '导出';
 
@@ -34,6 +34,7 @@ export interface BlockStyle {
 
 export interface Block {
   id: string;
+  name?: string;
   type: BlockType;
   x: number;
   y: number;
@@ -49,12 +50,13 @@ export interface Block {
   locked?: boolean;
   state?: Record<string, any>;
   events?: {
-    onClick?: BlockEvent[];
-    onHover?: BlockEvent[];
-    onChanged?: BlockEvent[];
+    onClick?: BlockEvent[] | BlockEvent;
+    onHover?: BlockEvent[] | BlockEvent;
+    onChanged?: BlockEvent[] | BlockEvent;
   };
   label?: string;
   src?: string;
+  props?: Record<string, any>;
 }
 
 export interface Page {
