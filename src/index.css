@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+.math-grid {
+  background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.math-dot-grid {
+  background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.dark .math-grid {
+  background-image: radial-gradient(circle, #475569 1px, transparent 1px);
+}
+
+.dark .math-dot-grid {
+  background-image: radial-gradient(#334155 1px, transparent 1px);
+}
+
+.glass-dock {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+}
+
+.dark .glass-dock {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.canvas-container {
+  width: 100%;
+  height: 100%;
+}
+
+.resize-handle {
+  width: 8px;
+  height: 8px;
+  background: white;
+  border: 2px solid #3b82f6;
+  position: absolute;
+}
